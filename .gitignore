@@ -1,0 +1,21 @@
+# .gitignore for ZapCRM
+
+# Ignore local configuration containing credentials
+config/config.php
+
+# Ignore temporary files and extracted product photos
+temp/
+temp/media/
+*.jpg
+*.jpeg
+*.png
+*.gif
+
+# Ignore local logs containing customer transaction data
+logs/
+logs/*.csv
+
+# OS specific files
+.DS_Store
+Thumbs.db
+desktop.ini
