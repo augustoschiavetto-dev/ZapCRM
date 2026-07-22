@@ -1,9 +1,15 @@
 <?php
 // login.php
+
+// Inicia a sessão no topo antes de qualquer saída HTTP
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 require_once __DIR__ . '/config/config.php';
 require_once __DIR__ . '/api/sicnet.php';
 
-// Redirect if already logged in
+// Redireciona se o usuário já estiver autenticado
 if (isset($_SESSION['usuario_logado'])) {
     header("Location: index.php");
     exit();
@@ -11,18 +17,18 @@ if (isset($_SESSION['usuario_logado'])) {
 
 $mensagem_erro = "";
 
-if (isset($_POST['nome']) && isset($_POST['senha'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nome']) && isset($_POST['senha'])) {
     $nome = trim($_POST['nome']);
     $senha = $_POST['senha'];
     
     $login_result = sicnet_login($nome, $senha);
     
-    if ($login_result['success']) {
+    if (isset($login_result['success']) && $login_result['success']) {
         $_SESSION['usuario_logado'] = $login_result['nome'];
         header("Location: index.php");
         exit();
     } else {
-        $mensagem_erro = $login_result['message'];
+        $mensagem_erro = isset($login_result['message']) ? $login_result['message'] : 'Usuário ou senha inválidos.';
     }
 }
 ?>
@@ -65,7 +71,6 @@ if (isset($_POST['nome']) && isset($_POST['senha'])) {
             position: relative;
         }
 
-        /* Decorative background blobs */
         body::before, body::after {
             content: '';
             position: absolute;
@@ -155,10 +160,6 @@ if (isset($_POST['nome']) && isset($_POST['senha'])) {
             font-weight: 500;
             margin-bottom: 8px;
             color: var(--text-primary);
-        }
-
-        .input-wrapper {
-            position: relative;
         }
 
         input {

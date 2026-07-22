@@ -1,110 +1,25 @@
 <?php
-// config/config.php
-session_start();
-
-// Database credentials
-define('DB_SERVER', 'LocalHost\\SQLEXPRESS'); // target SQL Server instance name
+// Configuração do Banco SQL Server (Sicnet)
+define('DB_SERVER', 'LocalHost\SQLEXPRESS');
 define('DB_DATABASE', 'SICNET');
 define('DB_USER', 'loja');
-define('DB_PASSWORD', 'Bandau45');
+define('DB_PASS', 'Bandau45');
 
-// Evolution API configuration
-define('EVOLUTION_API_URL', 'http://localhost:8080'); // Adjust to the target Evolution API address
-define('EVOLUTION_API_KEY', 'SUA_CHAVE_API_AQUI'); // Adjust to your global or instance API Key
-define('EVOLUTION_INSTANCE_NAME', 'loja_zap'); // Name of the instance in Evolution API
+// Configuração da Evolution API
+define('EVOLUTION_API_URL', 'http://192.168.1.109:8080'); 
+define('EVOLUTION_API_KEY', '429683C4C977415CAAFCCE10F7D57E11');
 
-// Local paths (ensure they are inside the workspace)
-define('DIR_PROJECT', dirname(__DIR__));
-define('DIR_LOGS', DIR_PROJECT . DIRECTORY_SEPARATOR . 'logs');
-define('DIR_MEDIA', DIR_PROJECT . DIRECTORY_SEPARATOR . 'temp' . DIRECTORY_SEPARATOR . 'media');
-
-// Create directories if they don't exist
-if (!file_exists(DIR_LOGS)) {
-    mkdir(DIR_LOGS, 0777, true);
-}
-if (!file_exists(DIR_MEDIA)) {
-    mkdir(DIR_MEDIA, 0777, true);
-}
-
-// SQL Server Connection Helper
+// Conexão com o banco via PDO SQLSRV
 function get_db_connection() {
-    $connectionInfo = array(
-        "Database" => DB_DATABASE,
-        "UID" => DB_USER,
-        "PWD" => DB_PASSWORD,
-        "CharacterSet" => "UTF-8"
-    );
-    
-    $conn = @sqlsrv_connect(DB_SERVER, $connectionInfo);
-    return $conn;
-}
-
-// Initialize database schema if not exists
-$conn = get_db_connection();
-if ($conn !== false) {
-    // Check if the ZAPCRM_ATENDIMENTOS table exists, if not, create it
-    $sql_check = "SELECT 1 FROM sysobjects WHERE name='ZAPCRM_ATENDIMENTOS' AND xtype='U'";
-    $stmt_check = sqlsrv_query($conn, $sql_check);
-    
-    if ($stmt_check !== false) {
-        if (!sqlsrv_has_rows($stmt_check)) {
-            $sql_create = "CREATE TABLE ZAPCRM_ATENDIMENTOS (
-                cliente_jid VARCHAR(50) PRIMARY KEY,
-                cliente_nome VARCHAR(150) NULL,
-                id_atendente VARCHAR(100) NULL,
-                nome_atendente VARCHAR(100) NULL,
-                status VARCHAR(50) DEFAULT 'EsperandoAtendimento',
-                data_inicio DATETIME NULL,
-                data_recebido DATETIME DEFAULT GETDATE(),
-                etiqueta VARCHAR(50) NULL,
-                ultimo_texto NVARCHAR(MAX) NULL
-            )";
-            sqlsrv_query($conn, $sql_create);
-        }
-        sqlsrv_free_stmt($stmt_check);
+    try {
+        $conn = new PDO(
+            "sqlsrv:Server=" . DB_SERVER . ";Database=" . DB_DATABASE,
+            DB_USER,
+            DB_PASS
+        );
+        $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        return $conn;
+    } catch (PDOException $e) {
+        die("Erro de Conexão com o Banco: " . $e->getMessage());
     }
-    sqlsrv_close($conn);
 }
-
-/**
- * Helper function to send API requests to Evolution API
- */
-function evolution_api_request($endpoint, $method = 'GET', $data = null) {
-    $url = rtrim(EVOLUTION_API_URL, '/') . '/' . ltrim($endpoint, '/');
-    
-    $headers = [
-        'Content-Type: application/json',
-        'apikey: ' . EVOLUTION_API_KEY
-    ];
-    
-    $ch = curl_init($url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
-    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-    
-    if ($data !== null) {
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-    }
-    
-    $response = curl_exec($ch);
-    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    
-    if ($response === false) {
-        $curl_error = curl_error($ch);
-        curl_close($ch);
-        return [
-            'code' => 0,
-            'body' => ['error' => 'Falha de conexão Curl: ' . $curl_error]
-        ];
-    }
-    
-    curl_close($ch);
-    
-    $decoded = json_decode($response, true);
-    return [
-        'code' => $http_code,
-        'body' => $decoded !== null ? $decoded : $response
-    ];
-}
-?>

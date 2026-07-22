@@ -3,18 +3,64 @@
 require_once __DIR__ . '/../config/config.php';
 
 /**
- * Creates the WhatsApp instance dynamically on Evolution API
+ * Configures the Webhook for this instance on Evolution API v2.x
+ * Returns boolean success
+ */
+function whatsapp_configurar_webhook($webhookUrl) {
+    $endpoint = '/webhook/set/' . EVOLUTION_INSTANCE_NAME;
+    $data = [
+        'webhook' => [
+            'enabled' => true,
+            'url'     => $webhookUrl,
+            'events'  => [
+                'MESSAGES_UPSERT',
+                'MESSAGES_UPDATE',
+                'CONNECTION_UPDATE',
+                'QRCODE_UPDATED'
+            ]
+        ]
+    ];
+    $res = evolution_api_request($endpoint, 'POST', $data);
+    if ($res['code'] === 200 || $res['code'] === 201) {
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Obtém a URL do Webhook a ser registrada na Evolution API
+ * Prioriza a constante WEBHOOK_OVERRIDE_URL caso esteja definida no config
+ */
+function whatsapp_obter_webhook_url() {
+    if (defined('WEBHOOK_OVERRIDE_URL') && !empty(WEBHOOK_OVERRIDE_URL)) {
+        return WEBHOOK_OVERRIDE_URL;
+    }
+    
+    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https" : "http";
+    $host = isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : 'localhost';
+    $script_name = isset($_SERVER['SCRIPT_NAME']) ? $_SERVER['SCRIPT_NAME'] : '';
+    $project_path = str_replace('/api/whatsapp_instance.php', '', $script_name);
+    return $protocol . "://" . $host . $project_path . '/api/webhook.php';
+}
+
+/**
+ * Creates the WhatsApp instance dynamically on Evolution API v2.x
  * Returns boolean success
  */
 function whatsapp_criar_instancia() {
     $endpoint = '/instance/create';
     $data = [
         'instanceName' => EVOLUTION_INSTANCE_NAME,
-        'integration' => 'WHATSAPP-BAILEYS',
-        'qrcode' => true
+        'integration'  => 'WHATSAPP-BAILEYS',
+        'qrcode'       => true
     ];
+    
     $res = evolution_api_request($endpoint, 'POST', $data);
+    
     if ($res['code'] === 200 || $res['code'] === 201) {
+        // Automatically register webhook right after creation
+        $webhookUrl = whatsapp_obter_webhook_url();
+        whatsapp_configurar_webhook($webhookUrl);
         return true;
     }
     return false;
@@ -32,10 +78,10 @@ function whatsapp_obter_status() {
         return $res['body']['instance']['state'];
     }
     
-    // If instance is not found (404), create it dynamically
+    // If instance is not found (404), create it dynamically and inform status as connecting
     if ($res['code'] === 404 || (isset($res['body']['status']) && $res['body']['status'] === 404)) {
         whatsapp_criar_instancia();
-        return 'close';
+        return 'connecting';
     }
     
     return 'error';
@@ -57,15 +103,32 @@ function whatsapp_gerar_qrcode() {
     }
     
     if ($res['code'] === 200 || $res['code'] === 201) {
-        if (isset($res['body']['base64'])) {
+        $body = $res['body'];
+        
+        // Automatically configure webhook to ensure it is pointing to the current server
+        $webhookUrl = whatsapp_obter_webhook_url();
+        whatsapp_configurar_webhook($webhookUrl);
+        
+        // Trata a estrutura do QR Code Base64 direta ou aninhada na v2.x
+        $base64 = null;
+        if (isset($body['base64'])) {
+            $base64 = $body['base64'];
+        } elseif (isset($body['qrcode']['base64'])) {
+            $base64 = $body['qrcode']['base64'];
+        }
+        
+        if ($base64 !== null) {
             return [
                 'success' => true,
-                'qrcode' => $res['body']['base64'] // Base64 image string
+                'qrcode'  => $base64
             ];
-        } elseif (isset($res['body']['code'])) {
+        }
+        
+        // Caso a API retorne apenas o código alfanumérico ou estagnação de pairing
+        if (isset($body['code']) || isset($body['qrcode']['code'])) {
             return [
                 'success' => true,
-                'code' => $res['body']['code']
+                'code'    => $body['code'] ?? $body['qrcode']['code']
             ];
         }
     }
@@ -112,26 +175,20 @@ function whatsapp_obter_etiquetas() {
 
 /**
  * Adds or removes a label for a specific customer phone number
- * Handles cleaning the phone number and finding the label ID by name dynamically
  */
 function whatsapp_gerenciar_etiqueta($telefone, $nome_etiqueta, $acao = 'add') {
-    // Clean phone number: remove @s.whatsapp.net, spaces, +, -
     $numero_limpo = preg_replace('/[^0-9]/', '', $telefone);
     
-    // Fetch labels to find the ID corresponding to the label name
     $labels = whatsapp_obter_etiquetas();
     $label_id = null;
     
     foreach ($labels as $label) {
-        // Match label name case-insensitively
         if (isset($label['name']) && strcasecmp($label['name'], $nome_etiqueta) === 0) {
             $label_id = $label['id'];
             break;
         }
     }
     
-    // If label doesn't exist, we will log it. In WhatsApp Business, labels should be pre-created.
-    // If not found, we cannot perform the action.
     if ($label_id === null) {
         error_log("Aviso: Etiqueta '$nome_etiqueta' nao encontrada no WhatsApp.");
         return false;
@@ -139,9 +196,9 @@ function whatsapp_gerenciar_etiqueta($telefone, $nome_etiqueta, $acao = 'add') {
     
     $endpoint = '/label/handleLabel/' . EVOLUTION_INSTANCE_NAME;
     $data = [
-        'number' => $numero_limpo,
+        'number'  => $numero_limpo,
         'labelId' => $label_id,
-        'action' => $acao // 'add' or 'remove'
+        'action'  => $acao
     ];
     
     $res = evolution_api_request($endpoint, 'POST', $data);

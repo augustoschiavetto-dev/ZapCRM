@@ -287,6 +287,8 @@ $atendente_nome = $_SESSION['usuario_logado'];
         }
 
         // WhatsApp Connection State Verification
+        let qrcodePollTimer = null;
+
         function verificarConexao() {
             fetch('api/whatsapp_instance.php?ajax_action=status')
                 .then(res => res.json())
@@ -302,6 +304,14 @@ $atendente_nome = $_SESSION['usuario_logado'];
                         dot.textContent = '🟢';
                         text.textContent = 'Conectado';
                         indicator.title = 'Conectado. Clique para Desconectar/Logout';
+                        
+                        // Auto-close QR Code modal and notify if it was open
+                        const modal = document.getElementById('modal-qrcode');
+                        if (modal.classList.contains('open')) {
+                            fecharModalQrcode();
+                            alert("WhatsApp conectado com sucesso!");
+                            location.reload();
+                        }
                     } else if (data.status === 'close' || data.status === 'connecting') {
                         indicator.className = 'instance-status disconnected';
                         dot.textContent = '🔴';
@@ -336,24 +346,33 @@ $atendente_nome = $_SESSION['usuario_logado'];
         function abrirModalQrcode() {
             const modal = document.getElementById('modal-qrcode');
             modal.classList.add('open');
-            document.getElementById('qrcode-wrapper').innerHTML = '<div class="text-muted">Obtendo QR Code...</div>';
+            carregarQrcode();
+            
+            // Start interval to refresh QR code every 20 seconds
+            if (qrcodePollTimer) clearInterval(qrcodePollTimer);
+            qrcodePollTimer = setInterval(carregarQrcode, 20000);
+        }
+
+        function carregarQrcode() {
+            const wrapper = document.getElementById('qrcode-wrapper');
+            wrapper.innerHTML = '<div class="text-muted">Obtendo QR Code...</div>';
             
             fetch('api/whatsapp_instance.php?ajax_action=qrcode')
                 .then(res => res.json())
                 .then(data => {
                     if (data.success && data.qrcode) {
                         // Display the Base64 image
-                        document.getElementById('qrcode-wrapper').innerHTML = `
+                        wrapper.innerHTML = `
                             <img class="qr-code-img" src="${data.qrcode}" alt="Scan QR Code" width="220" height="220">
                         `;
                     } else {
-                        document.getElementById('qrcode-wrapper').innerHTML = `
+                        wrapper.innerHTML = `
                             <div class="text-danger" style="color:var(--red-rose);">${data.message || 'Erro ao carregar QR Code.'}</div>
                         `;
                     }
                 })
                 .catch(err => {
-                    document.getElementById('qrcode-wrapper').innerHTML = `
+                    wrapper.innerHTML = `
                         <div class="text-danger" style="color:var(--red-rose);">Erro de conexão com servidor local.</div>
                     `;
                 });
@@ -361,6 +380,10 @@ $atendente_nome = $_SESSION['usuario_logado'];
 
         function fecharModalQrcode() {
             document.getElementById('modal-qrcode').classList.remove('open');
+            if (qrcodePollTimer) {
+                clearInterval(qrcodePollTimer);
+                qrcodePollTimer = null;
+            }
         }
 
         // Fetch chats from queue database
